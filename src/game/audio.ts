@@ -1,23 +1,26 @@
-// Procedural WebAudio: SFX, character voices, music loops and arena ambience (no external assets)
+// MP3 background music + procedural WebAudio SFX and character voices
 import { getSettings } from "./store";
 
-interface Track { bpm: number; root: number; scale: number[]; chords: number[][]; kick: number[]; snare: number[]; lead: OscillatorType; swing?: number; energy: number }
-const TRACKS: Record<string, Track> = {
-  menu: { bpm: 112, root: 60, scale: [0, 2, 4, 7, 9], chords: [[0, 4, 7], [9, 0, 4], [5, 9, 0], [7, 11, 2]], kick: [0, 8], snare: [4, 12], lead: "triangle", energy: 1 },
-  arena0: { bpm: 138, root: 62, scale: [0, 2, 4, 7, 9], chords: [[0, 4, 7], [7, 11, 2], [9, 0, 4], [5, 9, 0]], kick: [0, 6, 8, 14], snare: [4, 12], lead: "square", energy: 2 },
-  arena1: { bpm: 150, root: 57, scale: [0, 3, 5, 7, 10], chords: [[0, 3, 7], [8, 0, 3], [5, 8, 0], [7, 10, 2]], kick: [0, 3, 8, 11], snare: [4, 12], lead: "sawtooth", energy: 3 },
-  arena2: { bpm: 126, root: 59, scale: [0, 2, 5, 7, 9], chords: [[0, 4, 7], [5, 9, 0], [7, 11, 2], [4, 7, 11]], kick: [0, 4, 8, 12], snare: [4, 12], lead: "square", swing: 0.04, energy: 2 },
-  result: { bpm: 100, root: 65, scale: [0, 4, 7, 9, 12], chords: [[0, 4, 7], [5, 9, 0], [7, 11, 2], [0, 4, 7]], kick: [0], snare: [8], lead: "triangle", energy: 1 },
+const MUSIC_FILES: Record<string, string> = {
+  menu: "menu.mp3",
+  "character-select": "character-select.mp3",
+  arena0: "rainbow-island.mp3",
+  arena1: "lava-factory.mp3",
+  arena2: "neon-night-market.mp3",
+  training: "training.mp3",
 };
-const mtof = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
 
 class AudioEngine {
   ctx: AudioContext | null = null;
-  master!: GainNode; musicG!: GainNode; sfxG!: GainNode;
+  master!: GainNode;
+  musicG!: GainNode;
+  sfxG!: GainNode;
   noiseBuf!: AudioBuffer;
+
   track: string | null = null;
-  timer: number | null = null;
-  step = 0; bar = 0; nextT = 0;
+  musicAudio: HTMLAudioElement | null = null;
   amb: { src: AudioBufferSourceNode; g: GainNode } | null = null;
   lastPlay: Record<string, number> = {};
 
@@ -42,16 +45,24 @@ class AudioEngine {
       }
       if (this.ctx.state === "suspended") void this.ctx.resume();
     } catch {
+      // HTMLAudioElement music can still work even if WebAudio is unavailable.
       this.ctx = null;
     }
   }
+
   applyVolumes() {
-    if (!this.ctx) return;
     const s = getSettings();
-    this.master.gain.value = s.master;
-    this.musicG.gain.value = s.music * 0.35;
-    this.sfxG.gain.value = s.sfx;
+    if (this.ctx) {
+      this.master.gain.value = clamp01(s.master);
+      // Kept for compatibility with the existing WebAudio audio graph.
+      this.musicG.gain.value = clamp01(s.music) * 0.35;
+      this.sfxG.gain.value = clamp01(s.sfx);
+    }
+    if (this.musicAudio) {
+      this.musicAudio.volume = clamp01(clamp01(s.master) * clamp01(s.music));
+    }
   }
+
   tone(f: number, dur: number, type: OscillatorType = "square", vol = 0.2, slide?: number, delay = 0, dest?: AudioNode) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime + delay;
@@ -68,8 +79,9 @@ class AudioEngine {
     o.start(t);
     o.stop(t + dur + 0.02);
   }
+
   noise(dur: number, vol = 0.2, freq = 2000, q = 0.7, type: BiquadFilterType = "bandpass", delay = 0, dest?: AudioNode, freqEnd?: number) {
-    if (!this.ctx) return;
+    if (!this.ctx || !this.noiseBuf) return;
     const t = this.ctx.currentTime + delay;
     const s = this.ctx.createBufferSource();
     s.buffer = this.noiseBuf;
@@ -87,6 +99,7 @@ class AudioEngine {
     s.start(t, Math.random());
     s.stop(t + dur + 0.05);
   }
+
   sfx(name: string) {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
@@ -128,6 +141,7 @@ class AudioEngine {
       case "join": this.tone(600, 0.1, "triangle", 0.15); this.tone(900, 0.15, "triangle", 0.15, undefined, 0.09); break;
     }
   }
+
   voice(charId: number, kind: "atk" | "hurt" | "ult" | "win" | "pick") {
     if (!this.ctx) return;
     const base = [1.35, 0.8, 0.95, 0.9, 1.5, 1.25][charId] || 1;
@@ -143,49 +157,50 @@ class AudioEngine {
       case "pick": this.tone(f, 0.1, ty, v, f * 1.3); this.tone(f * 1.5, 0.14, ty, v, f * 1.8, 0.1); break;
     }
   }
-  // ----- Music -----
+
+  // ----- MP3 background music -----
   playMusic(name: string) {
     this.init();
-    if (!this.ctx || this.track === name) return;
+    const file = MUSIC_FILES[name];
+    if (!file) {
+      this.stopMusic();
+      return;
+    }
+
+    if (this.track === name && this.musicAudio) {
+      this.applyVolumes();
+      if (this.musicAudio.paused) void this.musicAudio.play().catch(() => undefined);
+      return;
+    }
+
     this.stopMusic();
+    const player = new Audio(`/audio/${file}`);
+    player.loop = true;
+    player.preload = "auto";
+    player.volume = 0;
+    this.musicAudio = player;
     this.track = name;
-    this.step = 0;
-    this.bar = 0;
-    this.nextT = this.ctx.currentTime + 0.1;
-    this.timer = window.setInterval(() => this.schedule(), 40);
+    this.applyVolumes();
+
+    // Autoplay can be rejected by browser policy until the first user interaction.
+    // A later call to playMusic with the same track will retry playback.
+    void player.play().catch(() => undefined);
   }
-  stopMusic() {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-    this.track = null;
-  }
-  schedule() {
-    if (!this.ctx || !this.track) return;
-    const tk = TRACKS[this.track];
-    if (!tk) return;
-    const sixteenth = 60 / tk.bpm / 4;
-    while (this.nextT < this.ctx.currentTime + 0.2) {
-      const s = this.step % 16;
-      const chord = tk.chords[this.bar % tk.chords.length];
-      const t = this.nextT - this.ctx.currentTime;
-      const d = this.musicG;
-      if (tk.kick.includes(s)) { this.tone(140, 0.12, "sine", 0.5, 45, t, d); }
-      if (tk.snare.includes(s)) { this.noise(0.1, 0.25, 2500, 0.8, "bandpass", t, d); }
-      if (s % 2 === 0 && tk.energy > 1) this.noise(0.03, 0.08, 8000, 1, "highpass", t, d);
-      if (tk.energy > 2 && s % 4 === 2) this.noise(0.03, 0.06, 9000, 1, "highpass", t, d);
-      if ([0, 3, 6, 8, 11, 14].includes(s)) this.tone(mtof(tk.root - 24 + chord[0]), sixteenth * 2.2, "triangle", 0.4, undefined, t, d);
-      const arp = chord[(s / 2 | 0) % 3] + (s % 4 === 0 ? 12 : 0);
-      if (s % 2 === 0) this.tone(mtof(tk.root + arp), sixteenth * 1.5, tk.lead, 0.07, undefined, t, d);
-      const seed = (this.bar * 7 + s * 13) % 11;
-      if ((s % 4 === 0 || (tk.energy > 1 && s % 4 === 3)) && seed > 3) {
-        const note = tk.scale[seed % tk.scale.length] + 12;
-        this.tone(mtof(tk.root + note), sixteenth * 2.5, tk.lead, 0.09, undefined, t + (s % 2 ? (tk.swing || 0) : 0), d);
-      }
-      this.nextT += sixteenth;
-      this.step++;
-      if (this.step % 16 === 0) this.bar++;
+
+  resumeMusic() {
+    if (this.musicAudio?.paused) {
+      void this.musicAudio.play().catch(() => undefined);
     }
   }
+
+  stopMusic() {
+    if (this.musicAudio) {
+      this.musicAudio.pause();
+      this.musicAudio = null;
+    }
+    this.track = null;
+  }
+
   ambience(kind: number | null) {
     if (this.amb && this.ctx) {
       try { this.amb.src.stop(); } catch { /* already stopped */ }
@@ -205,5 +220,6 @@ class AudioEngine {
     this.amb = { src, g };
   }
 }
+
 export const audio = new AudioEngine();
 export const sfx = (n: string) => audio.sfx(n);

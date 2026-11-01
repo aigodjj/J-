@@ -44,19 +44,46 @@ export default function App() {
 
   useEffect(() => {
     void generateAssets(setProg).then(() => setReady(true));
-    const unlock = () => { audio.init(); audio.applyVolumes(); };
+    const unlock = () => { audio.init(); audio.applyVolumes(); audio.resumeMusic(); };
     window.addEventListener("pointerdown", unlock);
     window.addEventListener("keydown", unlock);
     return () => { window.removeEventListener("pointerdown", unlock); window.removeEventListener("keydown", unlock); };
   }, []);
 
-  // music per screen
+  // Background music: MP3 files from /public/audio.
+  // Results are intentionally silent; OfflineFlow controls its own nested setup steps.
   useEffect(() => {
     audio.applyVolumes();
-    if (scr === "battle") return;
-    if (scr === "results") audio.playMusic("result");
-    else if (scr !== "loading") audio.playMusic("menu");
-  }, [scr, settings.master, settings.music]);
+
+    if (scr === "loading" || scr === "results") {
+      audio.stopMusic();
+      return;
+    }
+
+    if (scr === "battle") {
+      if (!battle) {
+        audio.stopMusic();
+      } else if (battle.cfg.mode === "training") {
+        audio.playMusic("training");
+      } else {
+        audio.playMusic(`arena${battle.cfg.arena}`);
+      }
+      return;
+    }
+
+    if (scr === "charsel") {
+      audio.playMusic("character-select");
+      return;
+    }
+
+    if (scr === "cpu" || scr === "training") {
+      // OfflineFlow switches between character-select and setup music based on its step.
+      return;
+    }
+
+    audio.playMusic("menu");
+  }, [scr, battle?.cfg.mode, battle?.cfg.arena, settings.master, settings.music]);
+
   useEffect(() => { audio.applyVolumes(); }, [settings.master, settings.music, settings.sfx]);
 
   const startBattle = useCallback((cfg: MatchConfig) => {
@@ -64,7 +91,7 @@ export default function App() {
     setScr("battle");
   }, []);
 
-  // guest receives "start" from host
+  // Guest receives "start" from host.
   useEffect(() => {
     const off = room.on("start", (m) => {
       if (room.role !== "guest" || scrRef.current === "battle") return;
@@ -90,7 +117,7 @@ export default function App() {
         <div className="absolute inset-0 bg-candy bg-grid flex flex-col items-center justify-center gap-6 text-white">
           <div className="text-7xl md:text-8xl font-black title-stroke text-center leading-tight floaty">J群斜咖<br />大亂鬥</div>
           <div className="w-80 h-5 rounded-full bg-black/40 border-[3px] border-[#1d0f45] overflow-hidden"><div className="h-full bg-[#ff4fa0] transition-all" style={{ width: prog * 100 + "%" }} /></div>
-          {ready ? <Btn big color="#4ade80" text="#10381f" sound="confirm" onClick={() => { audio.init(); setScr("menu"); }}>▶ {tr("點擊開始", "Click to Start")}</Btn> : <div className="flex items-center gap-3 font-bold"><Spinner />{tr("載入 3D 角色與場地中…", "Loading 3D characters & arenas…")}</div>}
+          {ready ? <Btn big color="#4ade80" text="#10381f" sound="confirm" onClick={() => { audio.init(); audio.playMusic("menu"); setScr("menu"); }}>▶ {tr("點擊開始", "Click to Start")}</Btn> : <div className="flex items-center gap-3 font-bold"><Spinner />{tr("載入 3D 角色與場地中…", "Loading 3D characters & arenas…")}</div>}
           <div className="text-xs text-white/60">{tr("建議使用桌面版 Chrome / Edge / Firefox，並使用鍵盤遊玩", "Best on desktop Chrome/Edge/Firefox with a keyboard")}</div>
         </div>
       );

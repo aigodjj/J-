@@ -45,7 +45,14 @@ export function CharInfo({ id, compact }: { id: number; compact?: boolean }) {
 export function CharSelect({ title, tag, initial = 0, onConfirm, onBack, confirmText }: { title: string; tag: string; initial?: number; onConfirm: (id: number) => void; onBack: () => void; confirmText?: string }) {
   const [cur, setCur] = useState(initial);
   const [cmd, setCmd] = useState<Cmd | undefined>();
-  useEffect(() => { audio.voice(cur, "pick"); setCmd({ id: Math.random(), kind: "move", key: "jab" }); }, [cur]);
+
+  useEffect(() => {
+    // Character-select music is shared by the standalone selector and OfflineFlow.
+    audio.playMusic("character-select");
+    audio.voice(cur, "pick");
+    setCmd({ id: Math.random(), kind: "move", key: "jab" });
+  }, [cur]);
+
   const move = (d: number) => { audio.sfx("select"); setCur((c) => (c + d + 6) % 6); };
   useKey((e) => {
     if (e.code === "ArrowRight" || e.code === "KeyD") move(1);

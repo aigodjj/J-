@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ARENAS, CHARS, DIFFICULTIES, MatchConfig, Rules, tr } from "../game/data";
 import { getProfile, getSettings, updateSettings, useStore } from "../game/store";
+import { audio } from "../game/audio";
 import { thumbs } from "../game/snap";
 import { Btn, Portrait, Row, Screen, Seg, Toggle } from "./common";
 import { CharSelect } from "./Select";
@@ -42,8 +43,19 @@ export function OfflineFlow({ mode, onStart, onBack }: { mode: "cpu" | "training
   const [diff, setDiff] = useState(settings.difficulty);
   const [rules, setRules] = useState<Rules>({ ...settings.rules });
 
+  useEffect(() => {
+    if (step < 2) {
+      audio.playMusic("character-select");
+    } else if (mode === "training") {
+      audio.playMusic("training");
+    } else {
+      audio.playMusic("menu");
+    }
+  }, [mode, step]);
+
   if (step === 0) return <CharSelect title={tr("選擇你的角色", "Choose Your Fighter")} tag="P1" initial={p1} onBack={onBack} onConfirm={(id) => { setP1(id); setStep(1); }} />;
   if (step === 1) return <CharSelect title={mode === "cpu" ? tr("選擇 CPU 對手", "Choose CPU Opponent") : tr("選擇訓練假人", "Choose Training Dummy")} tag={mode === "cpu" ? "CPU" : "DUMMY"} initial={p2} onBack={() => setStep(0)} onConfirm={(id) => { setP2(id); setStep(2); }} />;
+
   const start = () => {
     updateSettings({ defChar: p1, defArena: arena, difficulty: diff, rules: mode === "cpu" ? rules : settings.rules });
     const prof = getProfile();
@@ -56,6 +68,7 @@ export function OfflineFlow({ mode, onStart, onBack }: { mode: "cpu" | "training
       ],
     });
   };
+
   return (
     <Screen title={mode === "cpu" ? tr("對戰設定 · VS CPU", "Match Setup · VS CPU") : tr("訓練模式設定", "Training Setup")} onBack={() => setStep(1)}>
       <div className="grid md:grid-cols-2 gap-4">
