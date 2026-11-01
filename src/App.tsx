@@ -52,37 +52,59 @@ export default function App() {
 
   // Background music: MP3 files from /public/audio.
   // Results are intentionally silent; OfflineFlow controls its own nested setup steps.
-  useEffect(() => {
-    audio.applyVolumes();
+  // Background music: MP3 files from /public/audio.
+useEffect(() => {
+  audio.applyVolumes();
 
-    if (scr === "loading" || scr === "results") {
+  if (scr === "loading") {
+    audio.stopMusic();
+    return;
+  }
+
+  // 結算畫面：依照本機玩家的比賽結果播放音樂
+  if (scr === "results") {
+    if (!result || result.reason === "aborted" || result.winner < 0) {
       audio.stopMusic();
-      return;
+    } else if (result.winner === result.localSlot) {
+      audio.playMusic("victory");
+    } else {
+      audio.playMusic("defeat");
     }
+    return;
+  }
 
-    if (scr === "battle") {
-      if (!battle) {
-        audio.stopMusic();
-      } else if (battle.cfg.mode === "training") {
-        audio.playMusic("training");
-      } else {
-        audio.playMusic(`arena${battle.cfg.arena}`);
-      }
-      return;
+  if (scr === "battle") {
+    if (!battle) {
+      audio.stopMusic();
+    } else if (battle.cfg.mode === "training") {
+      audio.playMusic("training");
+    } else {
+      audio.playMusic(`arena${battle.cfg.arena}`);
     }
+    return;
+  }
 
-    if (scr === "charsel") {
-      audio.playMusic("character-select");
-      return;
-    }
+  if (scr === "charsel") {
+    audio.playMusic("character-select");
+    return;
+  }
 
-    if (scr === "cpu" || scr === "training") {
-      // OfflineFlow switches between character-select and setup music based on its step.
-      return;
-    }
+  if (scr === "cpu" || scr === "training") {
+    // OfflineFlow switches between character-select and setup music.
+    return;
+  }
 
-    audio.playMusic("menu");
-  }, [scr, battle?.cfg.mode, battle?.cfg.arena, settings.master, settings.music]);
+  audio.playMusic("menu");
+}, [
+  scr,
+  result?.winner,
+  result?.localSlot,
+  result?.reason,
+  battle?.cfg.mode,
+  battle?.cfg.arena,
+  settings.master,
+  settings.music,
+]);
 
   useEffect(() => { audio.applyVolumes(); }, [settings.master, settings.music, settings.sfx]);
 

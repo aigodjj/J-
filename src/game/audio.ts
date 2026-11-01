@@ -8,6 +8,8 @@ const MUSIC_FILES: Record<string, string> = {
   arena1: "lava-factory.mp3",
   arena2: "neon-night-market.mp3",
   training: "training.mp3",
+  victory: "victory.mp3",
+  defeat: "defeat.mp3",
 };
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
